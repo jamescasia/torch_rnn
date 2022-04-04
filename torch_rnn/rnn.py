@@ -28,12 +28,20 @@ class RNN(nn.Module):
         # x is n x time_steps x embed_length 
         n = X.shape[0] 
         
-        # make sure X axis 1 is less than time_steps, cause it might crash.
+        # make sure X axis 1 is less than time_steps
         assert(X.shape[1] <= self.time_steps)
         
-        # Add post-padding when input length less than time-steps
+        # Model expects inputs can have varying sizes and expects these inputs to be post-padded with NaN values.
+        # non_padded_length aims to get the non-padded length of the input sequence of the particular example.
+        non_padded_length = 0
+        for i in range(X.shape[1]):
+            if X[:, i, :].isnan().any().item(): 
+                break
+            non_padded_length += 1
+        
+        # Add NaN post-padding when input length less than time-steps
         pad_length = self.time_steps - X.shape[1]
-        X = torch.cat((X, torch.zeros(n, pad_length, self.input_dim).to(self.device)), axis = 1).to(self.device)
+        X = torch.cat((X, float('nan') + torch.zeros(n, pad_length, self.input_dim).to(self.device)), axis = 1).to(self.device)
         
         # Initialize the first activation.
         a = torch.zeros(n, self.act_dim).to(self.device)
@@ -43,23 +51,29 @@ class RNN(nn.Module):
         
         # Create the Y array, the individual y-predictions will be stored here
         Y = torch.zeros(n, self.time_steps, self.unit_output_dim).to(self.device)
-         
+        
         for i,cell in enumerate(self.models):
             # Get the input
             x = X[:, i, :] 
             
             # if input is padding, simply copy over previous activations and y
-            if i >= self.time_steps - pad_length:
+            if i >= non_padded_length:
                 a,Y[:, i, :] = a, Y[:, i-1, :]  
                 
             # if input is not padding, pass to rnn cell to get a and y
             else: 
-                a,Y[:, i,:] = cell(a, x)   
+                a,Y[:, i, :] = cell(a, x)   
                 
             A[:, i, :] = a
             
         if self.return_sequences:
             return A
+        
         else:
             # only return the last predictions detailed in output_dim
-            return Y[:, -self.output_dim:, :]
+            if non_padded_length - self.output_dim >= 0:
+                return Y[:, non_padded_length - self.output_dim:non_padded_length, :]
+            
+            else:
+                return Y[:, :self.output_dim:, :]
+                
